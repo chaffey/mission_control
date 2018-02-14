@@ -14,18 +14,29 @@ Adafruit_8x16matrix backpacks[MATRIX_COUNT] = {
   Adafruit_8x16matrix()
 };
 
-uint16_t buffers [MATRIX_COUNT][8] = { 0, 0, 0, 0 };
+uint16_t buffers [MATRIX_COUNT][8] = { 
+  0b00000000, 
+  0b00000000, 
+  0b00000000, 
+  0b00000000, 
+};
 
 void setup() {
   Serial.begin(9600);
 
-  backpacks[0].begin(0x70);
-  backpacks[1].begin(0x71);
-  backpacks[2].begin(0x72);
-  backpacks[3].begin(0x74);
+  backpacks[BP_A].begin(0x70);
+  backpacks[BP_A].setBrightness(7);
+
+  backpacks[BP_B].begin(0x71);
+  backpacks[BP_B].setBrightness(7);
+
+  backpacks[BP_C].begin(0x72);
+  backpacks[BP_C].setBrightness(7);
+
+  backpacks[BP_D].begin(0x74);
+  backpacks[BP_D].setBrightness(7);
 
   for (int i = 0; i < MATRIX_COUNT; ++i) {
-    backpacks[i].setBrightness(7);
     backpacks[i].clear();
     backpacks[i].writeDisplay();
   }

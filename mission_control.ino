@@ -8,12 +8,8 @@
 /* Global Variables                                                      */
 /* ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ */
 
-const PROGMEM uint8_t BACKPACK_COUNT = 3;
-const PROGMEM uint8_t EXPANDER_COUNT = 5;
-
-const char SERIAL_DELIMITER = '|';
-
-char buf[17];
+const uint8_t BACKPACK_COUNT = 3;
+const uint8_t EXPANDER_COUNT = 5;
 
 Adafruit_8x16matrix backpacks[BACKPACK_COUNT] = {
   Adafruit_8x16matrix(),
@@ -61,8 +57,8 @@ Adafruit_MCP23017 expanders[EXPANDER_COUNT] = {
   Adafruit_MCP23017()
 };
 
-// 4 - 16 bit switch values
-uint16_t switch_buffers [EXPANDER_COUNT] = { 0, 0, 0, 0 };
+// 5 - 16 bit switch values
+uint16_t switch_buffers [EXPANDER_COUNT] = { 0, 0, 0, 0, 0 };
 
 // State flags and global constants
 bool launchSequence = false;
@@ -72,14 +68,29 @@ bool message = false;
 bool messageActive = false;
 unsigned long messageTime;
 unsigned long now;
+unsigned long last;
 
-bool flushing = false;
 bool launchActive = false;
+bool flushing = false;
 uint8_t flushCount = 0;
-unsigned long flushTime;
+const uint8_t FLUSH_RATE_LIMIT = 30;
+
 float dim = 7;
 float dimDir = 0;
 
+unsigned long fireSuppressOffTime;
+unsigned long mealPrepCutoff;
+unsigned long compactorCutoff;
+unsigned long suit1Cutoff;
+unsigned long suit2Cutoff;
+unsigned long healthCutoff;
+uint8_t healthVal;
+bool thrustState[3] = { 0, 0, 0 };
+bool rcsState[3] = { 0, 0, 0 };
+unsigned long musicChangeCutoff;
+uint16_t iteration = 0;
+
+// Status flags...
 bool s_standby = true;
 bool s_uplink = false;
 bool s_thrust = false;
@@ -97,24 +108,10 @@ bool s_h2Level = false;
 bool s_o2Press = false;
 bool s_h2Press = false;
 bool s_fire = false;
-unsigned long fireSuppressOffTime;
 bool s_temp = false;
 
-unsigned long mealPrepCutoff;
-unsigned long compactorCutoff;
-unsigned long suit1Cutoff;
-unsigned long suit2Cutoff;
-unsigned long healthCutoff;
-uint8_t healthVal;
-
-bool thrustState[3] = { 0, 0, 0 };
-bool rcsState[3] = { 0, 0, 0 };
-unsigned long musicChangeCutoff;
-
-int iteration = 0;
-
 /* ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ */
-/* Arduino Methods                                                       */
+/* Arduino setup()                                                       */
 /* ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ */
 
 void setup() {
@@ -143,13 +140,15 @@ void setup() {
   backpacks[2].begin(0x72);
   backpacks[2].setBrightness(dim);
 
-  //  for (int i = 0; i < BACKPACK_COUNT; ++i) {
-  //    backpackOn(i);
-  //    displayMatrix(i);
-  //    delay(1000);
-  //    backpackOff(i);
-  //    displayMatrix(i);
-  //  }
+  for (int i = 0; i < BACKPACK_COUNT; ++i) {
+    backpackOn(i);
+    displayMatrix(i);
+  }
+  delay(500);
+  for (int i = 0; i < BACKPACK_COUNT; ++i) {
+    backpackOff(i);
+    displayMatrix(i);
+  }
 
   for (int i = 0; i < EXPANDER_COUNT; ++i) {
     for (int j = 0; j < 16; ++j) {
@@ -165,17 +164,27 @@ void setup() {
 #endif
 }
 
+/* ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ */
+/* Arduino loop()                                                        */
+/* ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ */
 void loop() {
+  pullSwitchValues();
+  handleMessageFromPi();
+
   now = millis();
 
-  pullSwitchValues();
+  // 1 second timers
+  if (now - last > 1000) {
+    last = now;
 
-  if (iteration >= 100) {
-    iteration = 0;
+    if (flushCount > 0) {
+      flushCount--;
+    } else if (flushCount == 0 && s_wasteSystem) {
+      s_wasteSystem = false;
+    }
 
 #ifdef DEBUG
     debugInputs();
-    //  debugOutputs();
 #endif
   }
 
@@ -192,10 +201,19 @@ void loop() {
   for (int i = 0; i < BACKPACK_COUNT; ++i) {
     displayMatrix(i);
   }
+}
 
-  iteration++;
+void handleMessageFromPi() {
+  String str;
 
-  handleMessageFromPi();
+  if (Serial.available() > 0) {
+    str = Serial.readStringUntil('\n');
+    if (str.equalsIgnoreCase("FLUSH_COMPLETE")) {
+      flushing = false;
+    } else if (str.equalsIgnoreCase("FIRE")) {
+      s_fire = true;
+    }
+  }
 }
 
 /* ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ */
@@ -273,12 +291,6 @@ void processCrewLifePanel() {
     musicChangeCutoff = now + 3000;
   }
 
-  // music light
-  setLed(0, 1, 9, musicEnabled);
-
-  // unsigned long mealPrepCutoff;
-  // unsigned long compactorCutoff;
-
   if (switchState(2, 0) && suit2Cutoff == 0) {
     suit2Cutoff = now + 30000;
   } else if (suit2Cutoff < now) {
@@ -310,19 +322,27 @@ void processCrewLifePanel() {
     healthCutoff = 0;
   }
 
+  if (!flushing && switchState(2, 5)) {
+    flushCount += 20;
+    if (flushCount > FLUSH_RATE_LIMIT) {
+      activateMasterAlarm();
+      flushCount += 60;
+      s_wasteSystem = true;
+    } else {
+      flushing = true;
+      messagePi("FLUSH");
+    }
+  }
+
   for (int i = 0; i < 4; ++i) {
     setLed(0, 3, 3 - i, i == healthVal - 1);
   }
-
+  setLed(0, 1, 9, musicEnabled);
   setLed(0, 3, 4, mealPrepCutoff != 0);
   setLed(0, 3, 5, compactorCutoff != 0);
   setLed(0, 3, 6, suit1Cutoff != 0);
   setLed(0, 3, 7, suit2Cutoff != 0);
 
-  if (!flushing && switchState(2, 5)) {
-    flushing = true;
-    messagePi("FLUSH");
-  }
 }
 
 void processPyrotechnicsPanel() {
@@ -492,21 +512,11 @@ void pullSwitchValues() {
   }
 }
 
-void ledOn(uint8_t backpack, uint8_t cathode, uint16_t anode) {
-  led_buffers[backpack][cathode] |= _BV(anode);
-}
-
-void ledOff(uint8_t backpack, uint8_t cathode, uint16_t anode) {
-  if (led_buffers[backpack][cathode] & _BV(anode)) {
-    led_buffers[backpack][cathode] ^= _BV(anode);
-  }
-}
-
 void setLed(uint8_t backpack, uint8_t cathode, uint16_t anode, uint8_t state) {
   if (state == HIGH) {
-    ledOn(backpack, cathode, anode);
-  } else {
-    ledOff(backpack, cathode, anode);
+    led_buffers[backpack][cathode] |= _BV(anode);
+  } else if (led_buffers[backpack][cathode] & _BV(anode)) {
+    led_buffers[backpack][cathode] ^= _BV(anode);
   }
 }
 
@@ -529,62 +539,16 @@ void displayMatrix(int backpack) {
   backpacks[backpack].writeDisplay();
 }
 
-void intToBinaryCharArray(uint16_t val, char* o_buffer) {
-  for (int8_t i = 15; i >= 0 ; --i) {
-    if (val > 0) {
-      uint16_t b = val % 2;
-      o_buffer[i] = (char) (b + 48);
-      val = val >> 1;
-    } else {
-      o_buffer[i] = '0';
-    }
-  }
-  o_buffer[16] = 0;
-}
-
 void debugInputs() {
-  Serial.println();
-  Serial.print("Inputs: ");
+  Serial.print("I: ");
   for (uint16_t i = 0; i < EXPANDER_COUNT; ++i) {
-    Serial.print(i);
-    Serial.print(":");
     Serial.print(switch_buffers[i], BIN);
     Serial.print(" ");
   }
   Serial.println();
 }
 
-void debugOutputs() {
-  Serial.println("Outputs:");
-  for (uint8_t i = 0; i < BACKPACK_COUNT; ++i) {
-    Serial.print("  - Backpack #");
-    Serial.print(i + 1);
-    Serial.println(" -");
-    for (uint8_t j = 0; j < 8; ++j) {
-      Serial.print("    - Cathode: ");
-      Serial.print(j);
-      Serial.print(" - ");
-      Serial.print(led_buffers[i][j], BIN);
-      Serial.println(buf);
-    }
-  }
-}
-
 void messagePi(const char* message) {
   Serial.println(message);
-}
-
-void handleMessageFromPi() {
-  int x;
-  String str;
-
-  if (Serial.available() > 0) {
-    str = Serial.readStringUntil('\n');
-    if (str.equalsIgnoreCase("FLUSH_COMPLETE")) {
-      flushing = false;
-    } else if (str.equalsIgnoreCase("FIRE")) {
-      s_fire = true;
-    }
-  }
 }
 

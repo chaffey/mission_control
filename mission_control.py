@@ -2,8 +2,16 @@
 
 import serial
 import pygame
+import logging
 from random import randint
 
+logging.basicConfig(
+        level=logging.DEBUG,
+        format='%(asctime)s %(levelname)s %(message)s',
+        filename='/var/log/mission-control.log',
+        filemode='w')
+
+# User events
 END_FLUSH_EVENT = pygame.USEREVENT + 0
 END_MESSAGE_EVENT = pygame.USEREVENT + 1
 
@@ -20,6 +28,7 @@ chatters = []
 for i in range(10, 51):
     x = "/home/pi/sounds/chatter_%s.wav" % (i)
     chatters.append(pygame.mixer.Sound(x))
+    logging.debug('Adding in message file %s', x)
 
 rcs_l.set_volume(0.5)
 alarm.set_volume(0.25)
@@ -37,22 +46,28 @@ ser = serial.Serial('/dev/ttyACM0', 9600, parity=serial.PARITY_NONE, stopbits=se
 
 running = True
 
-try :
+logging.info('Starting main loop...')
 
+try:
     while running:
 
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
+                logging.info('Received exit - quitting script')
                 running = False
+                ser.close()
                 pygame.quit()
             if event.type == END_FLUSH_EVENT:
                 ser.write('FLUSH_COMPLETE\n')
+                logging.debug('To serial: FLUSH_COMPLETE')
             if event.type == END_MESSAGE_EVENT:
                 ser.write('MESSAGE_COMPLETE\n')
+                logging.debug('To serial: MESSAGE_COMPLETE')
 
-        if running:
+        try:
             read_serial = ser.readline()[:-2]
             if read_serial:
+                logging.debug('From serial: %s', read_serial)
                 if read_serial == 'FLUSH':
                     c0.play(toilet)
                 if read_serial == 'RCS_LEFT:ON':
@@ -87,6 +102,9 @@ try :
                     c0.play(launch)
                 if read_serial == 'MESSAGE':
                     c4.play(chatters[randint(0, 40)])
+        except serial.SerialException as err:
+            logging.error('Hit SerialException: %s', err)
+            ser.close()
 
 except SystemExit:
     pygame.quit()

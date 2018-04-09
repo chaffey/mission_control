@@ -324,12 +324,9 @@ void processCrewLifePanel() {
   if (getSwitchState(2, 4) && healthCutoff == 0) {
     healthCutoff = now + 30000;
     healthVal = random(1, 5);
-    if (healthVal >= 4) {
+    if (healthVal >= 3) {
       s_health = true;
       activateMasterAlarm();
-      for (int i = 0; i < 4; ++i) {
-        setLedState(0, 3, 3 - i, i == healthVal - 1);
-      }
     }
   } else if (healthCutoff < now) {
     healthCutoff = 0;
@@ -346,6 +343,10 @@ void processCrewLifePanel() {
       flushing = true;
       messagePi("FLUSH");
     }
+  }
+
+  for (int i = 0; i < 4; ++i) {
+    setLedState(0, 3, 3 - i, healthCutoff > now && i == healthVal - 1);
   }
 
   setLedState(0, 3, 6, suit1Cutoff != 0);
@@ -396,6 +397,14 @@ void processPyrotechnicsPanel() {
   } else if (!getSwitchState(2, 11) && rcsState[2]) {
     rcsState[2] = false;
     messagePi("RCS_LEFT:OFF");
+  }
+
+  s_thrust=false;
+  for(int i = 0; i < 3; ++i) {
+    if(thrustState[i] || rcsState[i]) {
+      s_thrust=true;
+      break;
+    }
   }
 }
 

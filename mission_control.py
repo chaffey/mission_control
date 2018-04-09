@@ -1,3 +1,5 @@
+#!/usr/bin/env python
+
 import serial
 import pygame
 from random import randint
@@ -17,7 +19,6 @@ launch = pygame.mixer.Sound('/home/pi/sounds/liftoff_commentary.wav')
 chatters = []
 for i in range(10, 51):
     x = "/home/pi/sounds/chatter_%s.wav" % (i)
-    print x
     chatters.append(pygame.mixer.Sound(x))
 
 rcs_l.set_volume(0.5)
@@ -33,20 +34,20 @@ c4.set_endevent(END_MESSAGE_EVENT)
 
 ser = serial.Serial('/dev/ttyACM0', 9600, parity=serial.PARITY_NONE, stopbits=serial.STOPBITS_ONE, bytesize=serial.EIGHTBITS, timeout=1)
 
-while True:
+running = True
+
+while running:
         
     for event in pygame.event.get():
+        if event.type == pygame.QUIT:
+            running = False
         if event.type == END_FLUSH_EVENT:
             ser.write('FLUSH_COMPLETE\n')
-            print 'flush done'
         if event.type == END_MESSAGE_EVENT:
             ser.write('MESSAGE_COMPLETE\n')
-            print 'message done'
     
     read_serial = ser.readline()[:-2]
     if read_serial:
-        print 'Serial in: ' + read_serial
-        
         if read_serial == 'FLUSH':
             c0.play(toilet)
         if read_serial == 'RCS_LEFT:ON':

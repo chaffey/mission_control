@@ -32,55 +32,61 @@ c3 = pygame.mixer.Channel(3)
 c4 = pygame.mixer.Channel(4)
 c4.set_endevent(END_MESSAGE_EVENT)
 
-ser = serial.Serial('/dev/ttyACM0', 9600, parity=serial.PARITY_NONE, stopbits=serial.STOPBITS_ONE, bytesize=serial.EIGHTBITS, timeout=1)
+ser = serial.Serial('/dev/ttyACM0', 9600, parity=serial.PARITY_NONE, stopbits=serial.STOPBITS_ONE,
+                    bytesize=serial.EIGHTBITS, timeout=1)
 
 running = True
 
-while running:
-        
-    for event in pygame.event.get():
-        if event.type == pygame.QUIT:
-            running = False
-        if event.type == END_FLUSH_EVENT:
-            ser.write('FLUSH_COMPLETE\n')
-        if event.type == END_MESSAGE_EVENT:
-            ser.write('MESSAGE_COMPLETE\n')
-    
-    read_serial = ser.readline()[:-2]
-    if read_serial:
-        if read_serial == 'FLUSH':
-            c0.play(toilet)
-        if read_serial == 'RCS_LEFT:ON':
-            c1.play(rcs_l, -1)
-        if read_serial == 'RCS_LEFT:OFF':
-            rcs_l.stop()
-        if read_serial == 'RCS_RIGHT:ON':
-            c1.play(rcs_l, -1)
-        if read_serial == 'RCS_RIGHT:OFF':
-            rcs_l.stop()
-        if read_serial == 'RCS_CENTER:ON':
-            c1.play(rcs_l, -1)
-        if read_serial == 'RCS_CENTER:OFF':
-            rcs_l.stop()
-        if read_serial == 'THRUST_LEFT:ON':
-            c2.play(thrust, -1)
-        if read_serial == 'THRUST_LEFT:OFF':
-            thrust.stop()
-        if read_serial == 'THRUST_RIGHT:ON':
-            c2.play(thrust, -1)
-        if read_serial == 'THRUST_RIGHT:OFF':
-            thrust.stop()
-        if read_serial == 'THRUST_CENTER:ON':
-            c2.play(thrust, -1)
-        if read_serial == 'THRUST_CENTER:OFF':
-            thrust.stop()
-        if read_serial == 'MASTER_ALARM:ON':
-            c3.play(alarm, -1)
-        if read_serial == 'MASTER_ALARM:OFF':
-            alarm.stop()
-        if read_serial == 'LAUNCH':
-            c0.play(launch)
-        if read_serial == 'MESSAGE':
-            c4.play(chatters[randint(0, 40)])
+try :
 
-pygame.quit()
+    while running:
+
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                running = False
+                pygame.quit()
+            if event.type == END_FLUSH_EVENT:
+                ser.write('FLUSH_COMPLETE\n')
+            if event.type == END_MESSAGE_EVENT:
+                ser.write('MESSAGE_COMPLETE\n')
+
+        if running:
+            read_serial = ser.readline()[:-2]
+            if read_serial:
+                if read_serial == 'FLUSH':
+                    c0.play(toilet)
+                if read_serial == 'RCS_LEFT:ON':
+                    c1.play(rcs_l, -1)
+                if read_serial == 'RCS_LEFT:OFF':
+                    rcs_l.stop()
+                if read_serial == 'RCS_RIGHT:ON':
+                    c1.play(rcs_l, -1)
+                if read_serial == 'RCS_RIGHT:OFF':
+                    rcs_l.stop()
+                if read_serial == 'RCS_CENTER:ON':
+                    c1.play(rcs_l, -1)
+                if read_serial == 'RCS_CENTER:OFF':
+                    rcs_l.stop()
+                if read_serial == 'THRUST_LEFT:ON':
+                    c2.play(thrust, -1)
+                if read_serial == 'THRUST_LEFT:OFF':
+                    thrust.stop()
+                if read_serial == 'THRUST_RIGHT:ON':
+                    c2.play(thrust, -1)
+                if read_serial == 'THRUST_RIGHT:OFF':
+                    thrust.stop()
+                if read_serial == 'THRUST_CENTER:ON':
+                    c2.play(thrust, -1)
+                if read_serial == 'THRUST_CENTER:OFF':
+                    thrust.stop()
+                if read_serial == 'MASTER_ALARM:ON':
+                    c3.play(alarm, -1)
+                if read_serial == 'MASTER_ALARM:OFF':
+                    alarm.stop()
+                if read_serial == 'LAUNCH':
+                    c0.play(launch)
+                if read_serial == 'MESSAGE':
+                    c4.play(chatters[randint(0, 40)])
+
+except SystemExit:
+    pygame.quit()

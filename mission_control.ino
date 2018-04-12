@@ -53,6 +53,7 @@ unsigned long fireSuppressOffTime;
 unsigned long mealPrepCutoff;
 unsigned long compactorCutoff;
 unsigned long suit1Cutoff;
+unsigned long suit2Cutoff;
 unsigned long toff;
 unsigned long healthCutoff;
 unsigned long musicChangeCutoff;

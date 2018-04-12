@@ -1,67 +1,51 @@
-#include <Wire.h>
 #include <Adafruit_LEDBackpack.h>
 #include <Adafruit_MCP23017.h>
-
-//#define DEBUG
+#include <HardwareSerial.h>
+#include <Wire.h>
+#include <stdio.h>
 
 /* ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ */
 /* Global Variables                                                      */
 /* ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ */
 
+// const unsigned long BAUD_RATE = 9600;
+// const unsigned long BAUD_RATE = 115200;
+// const unsigned long BAUD_RATE = 128000;
+// const unsigned long BAUD_RATE = 153600;
+// const unsigned long BAUD_RATE = 230400;
+// const unsigned long BAUD_RATE = 460800;
+// const unsigned long BAUD_RATE = 921600;
+// const unsigned long BAUD_RATE = 1500000;
+const unsigned long BAUD_RATE = 2000000;
+
 const uint8_t BACKPACK_COUNT = 3;
 const uint8_t EXPANDER_COUNT = 5;
 const uint8_t FLUSH_RATE_LIMIT = 30;
 
-Adafruit_8x16matrix backpacks[BACKPACK_COUNT] = {
-  Adafruit_8x16matrix(),
-  Adafruit_8x16matrix(),
-  Adafruit_8x16matrix()
-};
+Adafruit_LEDBackpack backpacks[BACKPACK_COUNT] = {
+    Adafruit_LEDBackpack(), Adafruit_LEDBackpack(), Adafruit_LEDBackpack()};
 
 // 3 x 8 (cathodes w/ 16 bit anode value)
-uint16_t led_buffers [BACKPACK_COUNT][8] = {
-  {
-    0b0000000000000000,
-    0b0000000000000000,
-    0b0000000000000000,
-    0b0000000000000000,
-    0b0000000000000000,
-    0b0000000000000000,
-    0b0000000000000000,
-    0b0000000000000000
-  }, {
-    0b0000000000000000,
-    0b0000000000000000,
-    0b0000000000000000,
-    0b0000000000000000,
-    0b0000000000000000,
-    0b0000000000000000,
-    0b0000000000000000,
-    0b0000000000000000
-  }, {
-    0b0000000000000000,
-    0b0000000000000000,
-    0b0000000000000000,
-    0b0000000000000000,
-    0b0000000000000000,
-    0b0000000000000000,
-    0b0000000000000000,
-    0b0000000000000000
-  }
-};
+uint16_t led_buffers[BACKPACK_COUNT][8] = {
+    {0b0000000000000000, 0b0000000000000000, 0b0000000000000000,
+     0b0000000000000000, 0b0000000000000000, 0b0000000000000000,
+     0b0000000000000000, 0b0000000000000000},
+    {0b0000000000000000, 0b0000000000000000, 0b0000000000000000,
+     0b0000000000000000, 0b0000000000000000, 0b0000000000000000,
+     0b0000000000000000, 0b0000000000000000},
+    {0b0000000000000000, 0b0000000000000000, 0b0000000000000000,
+     0b0000000000000000, 0b0000000000000000, 0b0000000000000000,
+     0b0000000000000000, 0b0000000000000000}};
 
 Adafruit_MCP23017 expanders[EXPANDER_COUNT] = {
-  Adafruit_MCP23017(),
-  Adafruit_MCP23017(),
-  Adafruit_MCP23017(),
-  Adafruit_MCP23017(),
-  Adafruit_MCP23017()
-};
+    Adafruit_MCP23017(), Adafruit_MCP23017(), Adafruit_MCP23017(),
+    Adafruit_MCP23017(), Adafruit_MCP23017()};
 
 // 5 - 16 bit switch values
-uint16_t switch_buffers [EXPANDER_COUNT] = { 0, 0, 0, 0, 0 };
+uint16_t switch_buffers[EXPANDER_COUNT] = {0, 0, 0, 0, 0};
 
 // State flags and global constants
+char buf[32];
 unsigned long messageTime = millis() + (random(20, 40) * 1000);
 unsigned long now;
 unsigned long last;
@@ -69,14 +53,14 @@ unsigned long fireSuppressOffTime;
 unsigned long mealPrepCutoff;
 unsigned long compactorCutoff;
 unsigned long suit1Cutoff;
-unsigned long suit2Cutoff;
+unsigned long toff;
 unsigned long healthCutoff;
 unsigned long musicChangeCutoff;
 
 uint8_t healthVal;
 uint8_t flushCount = 0;
 
-float dim = 7;
+float dim = 6;
 float dimDir = 0;
 
 bool launchSequence = false;
@@ -84,8 +68,18 @@ bool masterAlarm = false;
 bool musicEnabled = false;
 bool launchActive = false;
 bool flushing = false;
-bool thrustState[3] = { 0, 0, 0 };
-bool rcsState[3] = { 0, 0, 0 };
+bool thrustState[3] = {0, 0, 0};
+bool rcsState[3] = {0, 0, 0};
+bool o2FanOn = false;
+bool h2FanOn = false;
+bool heaterOn = false;
+bool o2PumpOn = false;
+bool h2PumpOn = false;
+bool co2ScrubberOn = false;
+bool cabinHeadOn = false;
+bool systemControlSwitches[3][8] = {{0, 0, 0, 0, 0, 0, 0, 0},
+                                    {0, 0, 0, 0, 0, 0, 0, 0},
+                                    {0, 0, 0, 0, 0, 0, 0, 0}};
 
 // Status flags...
 bool s_standby = true;
@@ -112,15 +106,11 @@ bool s_temp = false;
 /* ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ */
 
 void setup() {
-  Serial.begin(9600);
+  Serial.begin(BAUD_RATE);
 
   while (!Serial) {
-    ; // wait for serial port to connect. Needed for native USB
+    ;  // wait for serial port to connect. Needed for native USB
   }
-
-#ifdef DEBUG
-  Serial.println("Starting setup");
-#endif
 
   expanders[0].begin(0);
   expanders[1].begin(1);
@@ -141,7 +131,7 @@ void setup() {
     backpackOn(i);
     displayMatrix(i);
   }
-  delay(500);
+  delay(1000);
   for (int i = 0; i < BACKPACK_COUNT; ++i) {
     backpackOff(i);
     displayMatrix(i);
@@ -153,12 +143,6 @@ void setup() {
       expanders[i].pullUp(j, HIGH);
     }
   }
-
-  delay(20);
-
-#ifdef DEBUG
-  Serial.println("Setup complete");
-#endif
 }
 
 /* ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ */
@@ -179,10 +163,6 @@ void loop() {
     } else if (flushCount == 0 && s_wasteSystem) {
       s_wasteSystem = false;
     }
-
-#ifdef DEBUG
-    debugInputs();
-#endif
   }
 
   processStatusPanel();
@@ -293,32 +273,42 @@ void processCrewLifePanel() {
     musicChangeCutoff = now + 3000;
   }
 
-  if (getSwitchState(2, 0) && suit2Cutoff == 0) {
-    suit2Cutoff = now + 30000;
-  } else if (suit2Cutoff < now) {
-    suit2Cutoff = 0;
+  // meal prep
+  if (getSwitchState(2, 3) && mealPrepCutoff == 0) {
+    mealPrepCutoff = now + 30000;
+    setLedState(0, 3, 4, HIGH);
+  } else if (mealPrepCutoff > 0 && mealPrepCutoff < now) {
+    mealPrepCutoff = 0;
+    setLedState(0, 3, 4, LOW);
   }
 
+  // compactor
   if (getSwitchState(2, 1) && compactorCutoff == 0) {
     compactorCutoff = now + 30000;
     setLedState(0, 3, 5, HIGH);
-  } else if (compactorCutoff < now) {
+  } else if (compactorCutoff > 0 && compactorCutoff < now) {
     compactorCutoff = 0;
     setLedState(0, 3, 5, LOW);
   }
 
+  // Suit 1
   if (getSwitchState(2, 2) && suit1Cutoff == 0) {
     suit1Cutoff = now + 30000;
-  } else if (suit1Cutoff < now) {
+    messagePi("SUIT:PRESSURIZE");
+    setLedState(0, 3, 6, HIGH);
+  } else if (suit1Cutoff > 0 && suit1Cutoff < now) {
     suit1Cutoff = 0;
+    setLedState(0, 3, 6, LOW);
   }
 
-  if (getSwitchState(2, 3) && mealPrepCutoff == 0) {
-    mealPrepCutoff = now + 30000;
-    setLedState(0, 3, 4, HIGH);
-  } else if (mealPrepCutoff < now) {
-    mealPrepCutoff = 0;
-    setLedState(0, 3, 4, LOW);
+  // Suit 2
+  if (getSwitchState(2, 0) && suit2Cutoff == 0) {
+    suit2Cutoff = now + 30000;
+    messagePi("SUIT:PRESSURIZE");
+    setLedState(0, 3, 7, HIGH);
+  } else if (suit2Cutoff < now) {
+    suit2Cutoff = 0;
+    setLedState(0, 3, 7, LOW);
   }
 
   if (getSwitchState(2, 4) && healthCutoff == 0) {
@@ -328,7 +318,7 @@ void processCrewLifePanel() {
       s_health = true;
       activateMasterAlarm();
     }
-  } else if (healthCutoff < now) {
+  } else if (healthCutoff > 0 && healthCutoff < now) {
     healthCutoff = 0;
     s_health = false;
   }
@@ -337,9 +327,9 @@ void processCrewLifePanel() {
     flushCount += 20;
     if (flushCount > FLUSH_RATE_LIMIT) {
       activateMasterAlarm();
-      flushCount += 60;
+      flushCount += 80;
       s_wasteSystem = true;
-    } else {
+    } else if (!s_wasteSystem) {
       flushing = true;
       messagePi("FLUSH");
     }
@@ -348,10 +338,6 @@ void processCrewLifePanel() {
   for (int i = 0; i < 4; ++i) {
     setLedState(0, 3, 3 - i, healthCutoff > now && i == healthVal - 1);
   }
-
-  setLedState(0, 3, 6, suit1Cutoff != 0);
-  setLedState(0, 3, 7, suit2Cutoff != 0);
-
 }
 
 void processPyrotechnicsPanel() {
@@ -399,36 +385,110 @@ void processPyrotechnicsPanel() {
     messagePi("RCS_LEFT:OFF");
   }
 
-  s_thrust=false;
-  for(int i = 0; i < 3; ++i) {
-    if(thrustState[i] || rcsState[i]) {
-      s_thrust=true;
+  s_thrust = false;
+  for (int i = 0; i < 3; ++i) {
+    if (thrustState[i] || rcsState[i]) {
+      s_thrust = true;
       break;
     }
   }
 }
 
 void processCryogenicsPanel() {
-  // o2 fan
-  setLedState(0, 0, 0, getSwitchState(3, 8));
+  // o2 fan1
+  if (getSwitchState(3, 8)) {
+    if (!o2FanOn) {
+      o2FanOn = true;
+      messagePi("O2_FAN:ON");
+    }
+    setLedState(0, 0, 1, HIGH);
+  } else if (o2FanOn) {
+    o2FanOn = false;
+    messagePi("O2_FAN:OFF");
+    setLedState(0, 0, 1, LOW);
+  }
+
   // h2 fan
-  setLedState(0, 0, 2, getSwitchState(3, 9));
+  if (getSwitchState(3, 9)) {
+    if (!h2FanOn) {
+      h2FanOn = true;
+      messagePi("H2_FAN:ON");
+    }
+    setLedState(0, 0, 2, HIGH);
+  } else if (h2FanOn) {
+    h2FanOn = false;
+    messagePi("H2_FAN:OFF");
+    setLedState(0, 0, 2, LOW);
+  }
+
   // heater
-  setLedState(0, 0, 3, getSwitchState(3, 10));
+  if (getSwitchState(3, 10)) {
+    if (!heaterOn) {
+      heaterOn = true;
+      messagePi("HEATER:ON");
+    }
+    setLedState(0, 0, 3, HIGH);
+  } else if (heaterOn) {
+    heaterOn = false;
+    messagePi("HEATER:OFF");
+    setLedState(0, 0, 3, LOW);
+  }
+
   // o2 pump
-  setLedState(0, 0, 4, getSwitchState(3, 11));
+  if (getSwitchState(3, 11)) {
+    if (!o2PumpOn) {
+      o2PumpOn = true;
+      messagePi("O2_PUMP:ON");
+    }
+    setLedState(0, 0, 4, HIGH);
+  } else if (o2PumpOn) {
+    o2PumpOn = false;
+    messagePi("O2_PUMP:OFF");
+    setLedState(0, 0, 4, LOW);
+  }
+
   // h2 pump
-  setLedState(0, 0, 5, getSwitchState(3, 12));
+  if (getSwitchState(3, 12)) {
+    if (!h2PumpOn) {
+      h2PumpOn = true;
+      messagePi("H2_PUMP:ON");
+    }
+    setLedState(0, 0, 5, HIGH);
+  } else if (h2PumpOn) {
+    h2PumpOn = false;
+    messagePi("H2_PUMP:OFF");
+    setLedState(0, 0, 5, LOW);
+  }
 }
 
 void processSystemControlPanel() {
   for (int i = 0; i < 8; ++i) {
-    // 9 - 16
-    setLedState(0, 2, i, getSwitchState(1, i));
     // 1 - 8
-    setLedState(0, 3, 8 + i, getSwitchState(0, i));
+    bool on = getSwitchState(0, i);
+    if (on != systemControlSwitches[0][i]) {
+      systemControlSwitches[0][i] = on;
+      sprintf(buf, "SWITCH_%2d:%s", i + 1, on ? "ON" : "OFF");
+      messagePi(buf);
+      setLedState(0, 3, 8 + i, on ? HIGH : LOW);
+    }
+
+    // 9 - 16
+    on = getSwitchState(1, i);
+    if (on != systemControlSwitches[1][i]) {
+      systemControlSwitches[1][i] = on;
+      sprintf(buf, "SWITCH_%2d:%s", i + 9, on ? "ON" : "OFF");
+      messagePi(buf);
+      setLedState(0, 2, i, on ? HIGH : LOW);
+    }
+
     // 17 - 24
-    setLedState(0, 2, 15 - i, getSwitchState(0, 8 + i));
+    on = getSwitchState(1, 8 + i);
+    if (on != systemControlSwitches[2][i]) {
+      systemControlSwitches[2][i] = on;
+      sprintf(buf, "SWITCH_%2d:%s", i + 17, on ? "ON" : "OFF");
+      messagePi(buf);
+      setLedState(0, 2, 15 - i, on ? HIGH : LOW);
+    }
   }
 }
 
@@ -487,10 +547,10 @@ void processStatusPanel() {
   setLedState(0, 4, 14, s_o2Press ? HIGH : LOW);
   // h2Press
   setLedState(0, 4, 15, s_h2Press ? HIGH : LOW);
-//  // fire
-//  setLedState(0, 4, 0, s_fire ? HIGH : LOW);
-//  // temp
-//  setLedState(0, 4, 0, s_temp ? HIGH : LOW);
+  // fire
+  // setLedState(0, 4, 0, s_fire ? HIGH : LOW);
+  // temp
+  // setLedState(0, 4, 0, s_temp ? HIGH : LOW);
 }
 
 /* ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ */
@@ -526,7 +586,8 @@ void pullSwitchValues() {
   }
 }
 
-void setLedState(uint8_t backpack, uint8_t cathode, uint16_t anode, uint8_t state) {
+void setLedState(uint8_t backpack, uint8_t cathode, uint16_t anode,
+                 uint8_t state) {
   if (state == HIGH) {
     led_buffers[backpack][cathode] |= _BV(anode);
   } else if (led_buffers[backpack][cathode] & _BV(anode)) {
@@ -553,17 +614,4 @@ void displayMatrix(int backpack) {
   backpacks[backpack].writeDisplay();
 }
 
-void debugInputs() {
-  Serial.print("I: ");
-  for (uint16_t i = 0; i < EXPANDER_COUNT; ++i) {
-    Serial.print(switch_buffers[i], BIN);
-    Serial.print(" ");
-  }
-  Serial.println();
-}
-
-void messagePi(const String message) {
-  Serial.println(message);
-}
-
-
+void messagePi(const String message) { Serial.println(message); }

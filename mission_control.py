@@ -5,50 +5,68 @@ import pygame
 import logging
 from random import randint
 
+# soundDir = '/home/pi/sounds'
+soundDir = '/Users/haffey.chris/Arduino/mission_control/sounds'
+
+baudRate = 2000000
+
+# setup logging
 logging.basicConfig(
-        level=logging.DEBUG,
-        format='%(asctime)s %(levelname)s %(message)s',
-        filename='/var/log/mission-control.log',
-        filemode='w')
-
-# User events
-END_FLUSH_EVENT = pygame.USEREVENT + 0
-END_MESSAGE_EVENT = pygame.USEREVENT + 1
-
-pygame.mixer.pre_init(44100, -16, 10, 4096)
-pygame.init()
-
-toilet = pygame.mixer.Sound('/home/pi/sounds/mr_thirsty.wav')
-rcs_l = pygame.mixer.Sound('/home/pi/sounds/rcs_sound.wav')
-thrust = pygame.mixer.Sound('/home/pi/sounds/thrusters2.wav')
-alarm = pygame.mixer.Sound('/home/pi/sounds/master_alarm.wav')
-launch = pygame.mixer.Sound('/home/pi/sounds/liftoff_commentary.wav')
-
-chatters = []
-for i in range(10, 51):
-    x = "/home/pi/sounds/chatter_%s.wav" % (i)
-    chatters.append(pygame.mixer.Sound(x))
-    logging.debug('Adding in message file %s', x)
-
-rcs_l.set_volume(0.5)
-alarm.set_volume(0.25)
-
-c0 = pygame.mixer.Channel(0)
-c0.set_endevent(END_FLUSH_EVENT)
-c1 = pygame.mixer.Channel(1)
-c2 = pygame.mixer.Channel(2)
-c3 = pygame.mixer.Channel(3)
-c4 = pygame.mixer.Channel(4)
-c4.set_endevent(END_MESSAGE_EVENT)
-
-ser = serial.Serial('/dev/ttyACM0', 9600, parity=serial.PARITY_NONE, stopbits=serial.STOPBITS_ONE,
-                    bytesize=serial.EIGHTBITS, timeout=1)
-
-running = True
-
-logging.info('Starting main loop...')
+    level=logging.DEBUG,
+    format='%(asctime)s %(levelname)s %(message)s',
+    filename='/var/log/mission-control.log',
+    filemode='w')
 
 try:
+    logging.info('Starting mission control panel processing...')
+
+    # User events
+    END_FLUSH_EVENT = pygame.USEREVENT + 0
+    END_MESSAGE_EVENT = pygame.USEREVENT + 1
+
+    # init pygame
+    pygame.mixer.pre_init(44100, -16, 10, 4096)
+    pygame.init()
+
+    # Load sounds...
+    toilet = pygame.mixer.Sound(soundDir + '/mr_thirsty.wav')
+    rcs = pygame.mixer.Sound(soundDir + '/rcs_sound.wav')
+    thrust = pygame.mixer.Sound(soundDir + '/thrusters2.wav')
+    alarm = pygame.mixer.Sound(soundDir + '/master_alarm.wav')
+    launch = pygame.mixer.Sound(soundDir + '/liftoff_commentary.wav')
+    pressurize = pygame.mixer.Sound(soundDir + '/compression.wav')
+    chatters = []
+    for i in range(10, 51):
+        x = '%s/chatter_%s.wav' % (soundDir, i)
+        chatters.append(pygame.mixer.Sound(x))
+        logging.debug('Adding in message file %s', x)
+
+    backgroundChannel = pygame.mixer.music.load(
+        soundDir + '/background_sound.wav')
+
+    flushChannel = pygame.mixer.Channel(0)
+    rcsChannel = pygame.mixer.Channel(1)
+    thrustChannel = pygame.mixer.Channel(2)
+    alarmChannel = pygame.mixer.Channel(3)
+    messageChannel = pygame.mixer.Channel(4)
+    cryoChannel = pygame.mixer.Channel(5)
+    launchChannel = pygame.mixer.Channel(6)
+
+    flushChannel.set_endevent(END_FLUSH_EVENT)
+    messageChannel.set_endevent(END_MESSAGE_EVENT)
+
+    rcs.set_volume(0.4)
+    alarm.set_volume(0.25)
+
+    running = True
+    chatterIndex = 0
+
+    logging.info('Starting main loop...')
+
+    # need to see if we can bind this programatically, not hard coded... will look into
+    # adding a udev rule to accomplish this
+    ser = serial.Serial('/dev/ttyACM0', baudRate)
+
     while running:
 
         for event in pygame.event.get():
@@ -65,46 +83,37 @@ try:
                 logging.debug('To serial: MESSAGE_COMPLETE')
 
         try:
-            read_serial = ser.readline()[:-2]
-            if read_serial:
-                logging.debug('From serial: %s', read_serial)
-                if read_serial == 'FLUSH':
-                    c0.play(toilet)
-                if read_serial == 'RCS_LEFT:ON':
-                    c1.play(rcs_l, -1)
-                if read_serial == 'RCS_LEFT:OFF':
-                    rcs_l.stop()
-                if read_serial == 'RCS_RIGHT:ON':
-                    c1.play(rcs_l, -1)
-                if read_serial == 'RCS_RIGHT:OFF':
-                    rcs_l.stop()
-                if read_serial == 'RCS_CENTER:ON':
-                    c1.play(rcs_l, -1)
-                if read_serial == 'RCS_CENTER:OFF':
-                    rcs_l.stop()
-                if read_serial == 'THRUST_LEFT:ON':
-                    c2.play(thrust, -1)
-                if read_serial == 'THRUST_LEFT:OFF':
+            action = ser.readline()[:-2]
+            if action:
+                logging.debug('From serial: %s', action)
+                if action == 'FLUSH':
+                    flushChannel.play(toilet)
+                if action == 'RCS:ON':
+                    rcsChannel.play(rcs, -1)
+                if action == 'RCS:OFF':
+                    rcs.stop()
+                if action == 'THRUST:ON':
+                    thrustChannel.play(thrust, -1)
+                if action == 'THRUST:OFF':
                     thrust.stop()
-                if read_serial == 'THRUST_RIGHT:ON':
-                    c2.play(thrust, -1)
-                if read_serial == 'THRUST_RIGHT:OFF':
-                    thrust.stop()
-                if read_serial == 'THRUST_CENTER:ON':
-                    c2.play(thrust, -1)
-                if read_serial == 'THRUST_CENTER:OFF':
-                    thrust.stop()
-                if read_serial == 'MASTER_ALARM:ON':
-                    c3.play(alarm, -1)
-                if read_serial == 'MASTER_ALARM:OFF':
+                if action == 'MASTER_ALARM:ON':
+                    alarmChannel.play(alarm, -1)
+                if action == 'MASTER_ALARM:OFF':
                     alarm.stop()
-                if read_serial == 'LAUNCH':
-                    c0.play(launch)
-                if read_serial == 'MESSAGE':
-                    c4.play(chatters[randint(0, 40)])
+                if action == 'LAUNCH':
+                    launchChannel.play(launch)
+                if action == 'ABORT':
+                    launch.stop()
+                if action == 'MESSAGE':
+                    messageChannel.play(chatters[chatterIndex])
+                    chatterIndex += 1
+                    if chatterIndex >= len(chatters):
+                        chatterIndex = 0
         except serial.SerialException as err:
             logging.error('Hit SerialException: %s', err)
             ser.close()
 
 except SystemExit:
     pygame.quit()
+
+logging.info('Mission control panel has ended')

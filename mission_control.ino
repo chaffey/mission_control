@@ -1,6 +1,5 @@
 #include <Adafruit_LEDBackpack.h>
 #include <Adafruit_MCP23017.h>
-#include <HardwareSerial.h>
 #include <Wire.h>
 #include <stdio.h>
 
@@ -18,28 +17,34 @@
 // const unsigned long BAUD_RATE = 1500000;
 const unsigned long BAUD_RATE = 2000000;
 
-const uint8_t BACKPACK_COUNT = 3;
+const uint8_t BACKPACK_COUNT = 5;
 const uint8_t EXPANDER_COUNT = 5;
 const uint8_t FLUSH_RATE_LIMIT = 30;
 
 Adafruit_LEDBackpack backpacks[BACKPACK_COUNT] = {
-    Adafruit_LEDBackpack(), Adafruit_LEDBackpack(), Adafruit_LEDBackpack()};
+  Adafruit_LEDBackpack(), Adafruit_LEDBackpack(), Adafruit_LEDBackpack()
+};
 
 // 3 x 8 (cathodes w/ 16 bit anode value)
 uint16_t led_buffers[BACKPACK_COUNT][8] = {
-    {0b0000000000000000, 0b0000000000000000, 0b0000000000000000,
-     0b0000000000000000, 0b0000000000000000, 0b0000000000000000,
-     0b0000000000000000, 0b0000000000000000},
-    {0b0000000000000000, 0b0000000000000000, 0b0000000000000000,
-     0b0000000000000000, 0b0000000000000000, 0b0000000000000000,
-     0b0000000000000000, 0b0000000000000000},
-    {0b0000000000000000, 0b0000000000000000, 0b0000000000000000,
-     0b0000000000000000, 0b0000000000000000, 0b0000000000000000,
-     0b0000000000000000, 0b0000000000000000}};
+  { 0b0000000000000000, 0b0000000000000000, 0b0000000000000000,
+    0b0000000000000000, 0b0000000000000000, 0b0000000000000000,
+    0b0000000000000000, 0b0000000000000000
+  },
+  { 0b0000000000000000, 0b0000000000000000, 0b0000000000000000,
+    0b0000000000000000, 0b0000000000000000, 0b0000000000000000,
+    0b0000000000000000, 0b0000000000000000
+  },
+  { 0b0000000000000000, 0b0000000000000000, 0b0000000000000000,
+    0b0000000000000000, 0b0000000000000000, 0b0000000000000000,
+    0b0000000000000000, 0b0000000000000000
+  }
+};
 
 Adafruit_MCP23017 expanders[EXPANDER_COUNT] = {
-    Adafruit_MCP23017(), Adafruit_MCP23017(), Adafruit_MCP23017(),
-    Adafruit_MCP23017(), Adafruit_MCP23017()};
+  Adafruit_MCP23017(), Adafruit_MCP23017(), Adafruit_MCP23017(),
+  Adafruit_MCP23017(), Adafruit_MCP23017()
+};
 
 // 5 - 16 bit switch values
 uint16_t switch_buffers[EXPANDER_COUNT] = {0, 0, 0, 0, 0};
@@ -61,7 +66,7 @@ unsigned long musicChangeCutoff;
 uint8_t healthVal;
 uint8_t flushCount = 0;
 
-float dim = 6;
+float dim = 3;
 float dimDir = 0;
 
 bool launchSequence = false;
@@ -79,8 +84,9 @@ bool h2PumpOn = false;
 bool co2ScrubberOn = false;
 bool cabinHeadOn = false;
 bool systemControlSwitches[3][8] = {{0, 0, 0, 0, 0, 0, 0, 0},
-                                    {0, 0, 0, 0, 0, 0, 0, 0},
-                                    {0, 0, 0, 0, 0, 0, 0, 0}};
+  {0, 0, 0, 0, 0, 0, 0, 0},
+  {0, 0, 0, 0, 0, 0, 0, 0}
+};
 
 // Status flags...
 bool s_standby = true;
@@ -101,6 +107,8 @@ bool s_o2Press = false;
 bool s_h2Press = false;
 bool s_fire = false;
 bool s_temp = false;
+
+int looper = 0;
 
 /* ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ */
 /* Arduino setup()                                                       */
@@ -175,10 +183,18 @@ void loop() {
   processSystemControlPanel();
   processCommunicationsPanel();
 
+  if(getBlinkState(1000) == HIGH) {
+    backpackOn(1);
+  } else {
+    backpackOff(1);
+  }
+
   // update the lights
   for (int i = 0; i < BACKPACK_COUNT; ++i) {
     displayMatrix(i);
   }
+
+  delay(20);
 }
 
 void handleMessageFromPi() {
@@ -278,6 +294,7 @@ void processCrewLifePanel() {
   if (getSwitchState(2, 3) && mealPrepCutoff == 0) {
     mealPrepCutoff = now + 30000;
     setLedState(0, 3, 4, HIGH);
+    messagePi("FOOD_PREP");
   } else if (mealPrepCutoff > 0 && mealPrepCutoff < now) {
     mealPrepCutoff = 0;
     setLedState(0, 3, 4, LOW);
@@ -287,6 +304,7 @@ void processCrewLifePanel() {
   if (getSwitchState(2, 1) && compactorCutoff == 0) {
     compactorCutoff = now + 30000;
     setLedState(0, 3, 5, HIGH);
+    messagePi("TRASH");
   } else if (compactorCutoff > 0 && compactorCutoff < now) {
     compactorCutoff = 0;
     setLedState(0, 3, 5, LOW);
@@ -344,46 +362,46 @@ void processCrewLifePanel() {
 void processPyrotechnicsPanel() {
   if (getSwitchState(2, 10) && !thrustState[0]) {
     thrustState[0] = true;
-    messagePi("THRUST_RIGHT:ON");
+    messagePi("THRUST:ON");
   } else if (!getSwitchState(2, 10) && thrustState[0]) {
     thrustState[0] = false;
-    messagePi("THRUST_RIGHT:OFF");
+    messagePi("THRUST:OFF");
   }
   if (getSwitchState(2, 9) && !thrustState[1]) {
     thrustState[1] = true;
-    messagePi("THRUST_CENTER:ON");
+    messagePi("THRUST:ON");
   } else if (!getSwitchState(2, 9) && thrustState[1]) {
     thrustState[1] = false;
-    messagePi("THRUST_CENTER:OFF");
+    messagePi("THRUST:OFF");
   }
   if (getSwitchState(2, 8) && !thrustState[2]) {
     thrustState[2] = true;
-    messagePi("THRUST_LEFT:ON");
+    messagePi("THRUST:ON");
   } else if (!getSwitchState(2, 8) && thrustState[2]) {
     thrustState[2] = false;
-    messagePi("THRUST_LEFT:OFF");
+    messagePi("THRUST:OFF");
   }
 
   if (getSwitchState(2, 13) && !rcsState[0]) {
     rcsState[0] = true;
-    messagePi("RCS_RIGHT:ON");
+    messagePi("RCS:ON");
   } else if (!getSwitchState(2, 13) && rcsState[0]) {
     rcsState[0] = false;
-    messagePi("RCS_RIGHT:OFF");
+    messagePi("RCS:OFF");
   }
   if (getSwitchState(2, 12) && !rcsState[1]) {
     rcsState[1] = true;
-    messagePi("RCS_CENTER:ON");
+    messagePi("RCS:ON");
   } else if (!getSwitchState(2, 12) && rcsState[1]) {
     rcsState[1] = false;
-    messagePi("RCS_CENTER:OFF");
+    messagePi("RCS:OFF");
   }
   if (getSwitchState(2, 11) && !rcsState[2]) {
     rcsState[2] = true;
-    messagePi("RCS_LEFT:ON");
+    messagePi("RCS:ON");
   } else if (!getSwitchState(2, 11) && rcsState[2]) {
     rcsState[2] = false;
-    messagePi("RCS_LEFT:OFF");
+    messagePi("RCS:OFF");
   }
 
   s_thrust = false;
@@ -483,7 +501,7 @@ void processSystemControlPanel() {
     }
 
     // 17 - 24
-    on = getSwitchState(1, 8 + i);
+    on = getSwitchState(0, 8 + i);
     if (on != systemControlSwitches[2][i]) {
       systemControlSwitches[2][i] = on;
       sprintf(buf, "SWITCH_%2d:%s", i + 17, on ? "ON" : "OFF");
@@ -506,6 +524,7 @@ void processCommunicationsPanel() {
   if (!s_uplink && messageTime < now) {
     if (getSwitchState(2, 14) == HIGH) {
       if (!s_uplink) {
+        setLedState(0, 0, 0, LOW);
         messagePi("MESSAGE");
         s_uplink = true;
       }
@@ -615,4 +634,6 @@ void displayMatrix(int backpack) {
   backpacks[backpack].writeDisplay();
 }
 
-void messagePi(const String message) { Serial.println(message); }
+void messagePi(const String message) {
+  Serial.println(message);
+}
